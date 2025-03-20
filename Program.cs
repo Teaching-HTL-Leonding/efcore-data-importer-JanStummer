@@ -50,23 +50,34 @@ static List<Customer> ParseInput(string[] input)
 var customers = ParseInput(input);
 
 
-foreach (var customer in customers)
+await using var transaction = await context.Database.BeginTransactionAsync();
+try
 {
-    await using (var transaction = await context.Database.BeginTransactionAsync())
+    foreach (var customer in customers)
     {
-        try
+        if (customer.CountryIsoCode.Length != 2)
         {
-            context.Customers.Add(customer);
-            await context.SaveChangesAsync();
-            await transaction.CommitAsync();
-            Console.WriteLine($"Transaction committed successfully for customer {customer.CompanyName}");
+            Console.Error.WriteLine($"Skipping customer '{customer.CompanyName}' due to invalid CountryIsoCode '{customer.CountryIsoCode}'");
+            continue;
         }
-        catch (Exception ex)
-        {
-            Console.Error.WriteLine($"Error committing transaction for customer {customer.CompanyName}: {ex.InnerException!.Message}");
-            Console.WriteLine($"Rolling back the transaction for customer {customer.CompanyName}");
-        }
+
+        context.Customers.Add(customer);
     }
+
+    await context.SaveChangesAsync();
+    await transaction.CommitAsync();
+    Console.WriteLine("Transaction committed successfully for all customers.");
 }
+catch (DbUpdateException ex)
+{
+    await transaction.RollbackAsync();
+    Console.Error.WriteLine($"Database error: {ex.InnerException?.Message ?? ex.Message}. Rolling back transaction.");
+}
+catch (Exception ex)
+{
+    await transaction.RollbackAsync();
+    Console.Error.WriteLine($"Unexpected error: {ex.Message}. Rolling back transaction.");
+}
+
 
 
